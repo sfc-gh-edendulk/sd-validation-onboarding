@@ -1,0 +1,21 @@
+syntax = "proto3";
+package sncf.validation;
+
+message ValidationEvent {
+  string validation_id = 1;
+  string equipment_id = 2;
+  string station_id = 3;
+  string ligne_id = 4;
+  int64  timestamp_ms = 5;
+  string media_type = 6;
+  string result = 7;
+  string channel = 8;
+  string equipment_type = 9;
+}
+
+message ValidationBatch {
+  string sd_id = 1;
+  string batch_id = 2;
+  int64  generated_at_ms = 3;
+  repeated ValidationEvent events = 4;
+}

@@ -1,126 +1,163 @@
-# SNCF New SI Validation — Account Onboarding
+# SNCF New SI Validation — SD Onboarding Kit
 
 Connect a new Snowflake account (any cloud, any org) to the SNCF validation data pipeline.
 
-## What this does
+## What you get
 
-Your account will receive real-time validation events (tap-in/tap-out from Flowbird and Conduent equipment) via Snowpipe auto-ingest from a shared AWS S3 bucket.
+After deployment, your account receives real-time validation events from the shared AWS pipeline:
 
 ```
-Concentrateur (simulated) → S3 → Lambda → Parquet → SNS → Your Snowpipe → Your table
+Concentrateur (Flowbird/Conduent) → S3 → Lambda → Parquet → SNS → Your Snowpipe → Your table
 ```
+
+Plus:
+- Streamlit dashboard showing your SD's validation KPIs
+- Dynamic Table KPI_DAILY with J-1 aggregation
+- Data sharing back to ORG CENTRALE
+- DCM (Database Change Management) templates for infrastructure-as-code
 
 ## Prerequisites
 
-- A Snowflake account with ACCOUNTADMIN access
-- `snow` CLI configured with a connection to your account
-- `conda` with the `crocevia` environment (or Python 3.11+ with `boto3`)
-- AWS CLI access (profile `edd_aws_test`) — provided by the demo admin
+- Snowflake account with **ACCOUNTADMIN** access
+- `snow` CLI installed and configured with a connection to your account
+- AWS CLI access (profile `edd_aws_test`) — provided by the pipeline admin
+- Python 3.11+ with `boto3` (use `conda activate crocevia` or `pip install boto3`)
 
-## Quick Start
-
-### 1. Run the Snowflake setup
-
-Edit `sql/setup.sql` — set your SD name and database name at the top, then:
+## Quick Deploy (one command)
 
 ```bash
-snow sql -f sql/setup.sql -c <YOUR_CONNECTION>
+./scripts/deploy.sh --sd SD3 --connection sncftrial --aws-profile edd_aws_test
 ```
 
-This creates: database, schema, storage integration, external stage, table, and Snowpipe.
+This creates everything: database, schemas, storage integration, IAM role, SNS subscription, stage, table, Snowpipe, generates test data, and verifies.
 
-### 2. Note the output from the last two queries
+## Ask Cortex Code to do it
 
-From `DESC INTEGRATION`:
-- `STORAGE_AWS_IAM_USER_ARN` (e.g., `arn:aws:iam::640083578061:user/externalstages/abc123`)
-- `STORAGE_AWS_EXTERNAL_ID` (e.g., `XX12345_SFCRole=2_someBase64String=`)
+```
+cortex "Deploy the SNCF validation pipeline to my account.
+Connection: sncftrial, SD: SD3, AWS profile: edd_aws_test.
+Run: ./scripts/deploy.sh --sd SD3 --connection sncftrial --aws-profile edd_aws_test
+Then run the Streamlit app and share data to CENTRALE."
+```
 
-From `SYSTEM$GET_AWS_SNS_IAM_POLICY`:
-- The `Principal.AWS` ARN (may differ from the one above)
+## Manual Steps (if deploy.sh fails)
 
-### 3. Send these values to the pipeline admin
+All commands use `snow sql -c <YOUR_CONNECTION>`:
 
-The admin will:
-1. Create an IAM role in AWS with your storage integration's trust policy
-2. Add your Snowpipe IAM user to the SNS topic policy
+### 1. Edit and run sql/setup.sql
 
-Or, if you have AWS access yourself:
+Replace all occurrences of `SD3` and `SNCF_VALIDATION_SD3` with your values, then:
+
+```bash
+snow sql -f sql/setup.sql -c sncftrial
+```
+
+### 2. Create AWS IAM role
+
+The setup.sql output gives you two values needed for AWS:
+- `STORAGE_AWS_IAM_USER_ARN` (from `DESC INTEGRATION`)
+- Snowpipe IAM user (from `SYSTEM$GET_AWS_SNS_IAM_POLICY`)
 
 ```bash
 export AWS_PROFILE=edd_aws_test
-SD=SD3  # your SD identifier
 
-# Create IAM role
 aws iam create-role \
-  --role-name sncf-validation-${SD,,}-snowflake-reader \
+  --role-name sncf-validation-sd3-snowflake-reader \
   --assume-role-policy-document '{
     "Version": "2012-10-17",
     "Statement": [{
       "Effect": "Allow",
       "Principal": {"AWS": "<STORAGE_AWS_IAM_USER_ARN>"},
       "Action": "sts:AssumeRole",
-      "Condition": {"StringEquals": {"sts:ExternalId": "<STORAGE_AWS_EXTERNAL_ID>"}}
+      "Condition": {"StringEquals": {"sts:ExternalId": "<EXTERNAL_ID>"}}
     }]
   }' \
   --tags Key=app_name,Value=sncf-new-si-validation Key=app_owner,Value=edendulk Key=app_env,Value=sesandbox Key=app_bu,Value=se
 
-# Attach S3 read policy
 aws iam put-role-policy \
-  --role-name sncf-validation-${SD,,}-snowflake-reader \
+  --role-name sncf-validation-sd3-snowflake-reader \
   --policy-name s3-read \
-  --policy-document "{
-    \"Version\": \"2012-10-17\",
-    \"Statement\": [
-      {\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\",\"s3:GetObjectVersion\"],\"Resource\":\"arn:aws:s3:::edendulksnow/transform/${SD}/*\"},
-      {\"Effect\":\"Allow\",\"Action\":[\"s3:ListBucket\",\"s3:GetBucketLocation\"],\"Resource\":\"arn:aws:s3:::edendulksnow\",\"Condition\":{\"StringLike\":{\"s3:prefix\":[\"transform/${SD}/*\"]}}}
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+      {"Effect":"Allow","Action":["s3:GetObject","s3:GetObjectVersion"],"Resource":"arn:aws:s3:::edendulksnow/transform/SD3/*"},
+      {"Effect":"Allow","Action":["s3:ListBucket","s3:GetBucketLocation"],"Resource":"arn:aws:s3:::edendulksnow","Condition":{"StringLike":{"s3:prefix":["transform/SD3/*"]}}}
     ]
-  }"
-
-# Update SNS topic policy (add Snowpipe IAM user to AllowSnowflakeSubscribe)
-# Get current policy:
-aws sns get-topic-attributes \
-  --topic-arn arn:aws:sns:us-west-2:484577546576:sncf-validation-ingest | jq -r '.Attributes.Policy'
-# Add your Snowpipe IAM user ARN to the Principal array, then set it back.
+  }'
 ```
 
-### 4. Verify the connection
+### 3. Update SNS topic policy
+
+Add the Snowpipe IAM user to the AllowSnowflakeSubscribe statement on:
+`arn:aws:sns:us-west-2:484577546576:sncf-validation-ingest`
+
+### 4. Re-run the Snowpipe creation (if it failed in step 1)
+
+The pipe creation may fail if the IAM role didn't exist yet. After step 2-3, re-run just the pipe section from setup.sql.
+
+### 5. Verify
 
 ```bash
-snow sql -c <YOUR_CONNECTION> -q "LIST @<DB>.RAW.VALIDATIONS_S3_STAGE;"
+snow sql -c sncftrial -q "LIST @SNCF_VALIDATION_SD3.RAW.VALIDATIONS_S3_STAGE;"
 ```
 
-If you see files listed, the integration is working.
-
-### 5. Generate test data
+## Generate Data
 
 ```bash
-conda activate crocevia
-AWS_PROFILE=edd_aws_test python scripts/generate_data.py --sd <YOUR_SD> --count 500
+AWS_PROFILE=edd_aws_test python scripts/generate_data.py --sd SD3 --count 1000
 ```
 
-Wait 30 seconds, then:
+Wait 30 seconds for Lambda + Snowpipe, then:
 
 ```bash
-snow sql -c <YOUR_CONNECTION> -q "SELECT COUNT(*) FROM <DB>.RAW.FACT_VALIDATIONS_PIPE;"
+snow sql -c sncftrial -q "SELECT COUNT(*) FROM SNCF_VALIDATION_SD3.RAW.FACT_VALIDATIONS_PIPE;"
+```
+
+## Run Streamlit Dashboard
+
+```bash
+SNOWFLAKE_CONNECTION_NAME=sncftrial streamlit run app/streamlit_app.py
+```
+
+## Share Data to CENTRALE (cross-org)
+
+Since your account may be in a different org than CENTRALE, use the Python loader:
+
+```bash
+python scripts/share_to_centrale.py --sd-connection sncftrial --sd SD3
+```
+
+This reads your `KPI_DAILY` Dynamic Table and inserts into `SNCF_CENTRAL.ANALYTICS.FACT_CONSOLIDATED`.
+
+For **same-org** accounts: uncomment the `ALTER SHARE` line in `sql/setup.sql` instead.
+
+## DCM (Infrastructure-as-Code)
+
+For reproducible deployments, use the DCM templates:
+
+```bash
+# Edit dcm/manifest.yml with your account + SD values, then:
+snow dcm plan --target sd_new
+snow dcm deploy --target sd_new
 ```
 
 ## Pipeline Details
 
-| Component | Location |
-|-----------|----------|
+| Component | Value |
+|-----------|-------|
 | S3 Bucket | `s3://edendulksnow` (us-west-2) |
 | SNS Topic | `arn:aws:sns:us-west-2:484577546576:sncf-validation-ingest` |
-| Lambda | `sncf-validation-protobuf-decoder` (us-west-2) |
+| Lambda | `sncf-validation-protobuf-decoder` |
 | AWS Account | `484577546576` |
 
-## Data Schema
+## Data Schema (FACT_VALIDATIONS_PIPE)
 
 | Column | Type | Description |
 |--------|------|-------------|
 | validation_id | STRING | Unique event ID |
-| equipment_id | STRING | Equipment identifier (e.g., SD1-EQ-0042) |
-| station_id | STRING | Station code (e.g., GDN, AUS) |
-| ligne_id | STRING | Line (A-U) |
+| equipment_id | STRING | Equipment (e.g., SD3-EQ-0042) |
+| station_id | STRING | Station code |
+| ligne_id | STRING | Transit line |
 | validation_ts | TIMESTAMP_NTZ | Event timestamp |
 | validation_date | DATE | Event date |
 | media_type | STRING | NAVIGO, TICKET_T_PLUS, etc. |
@@ -129,12 +166,3 @@ snow sql -c <YOUR_CONNECTION> -q "SELECT COUNT(*) FROM <DB>.RAW.FACT_VALIDATIONS
 | is_peak_hour | BOOLEAN | Peak hour flag |
 | sd_id | STRING | SD identifier |
 | equipment_type | STRING | Flowbird_MT, Conduent_CAB_MT, Conduent_M1R |
-
-## Using Cortex Code CLI
-
-You can ask Cortex Code to do all of this for you:
-
-```
-cortex "I need to onboard my Snowflake account to the SNCF validation pipeline.
-My connection is <CONNECTION>, my SD is SD3. Follow the README steps."
-```

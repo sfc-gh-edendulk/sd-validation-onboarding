@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-generate_data.py — Simulates Flowbird/Conduent concentrateur Protobuf output.
+generate_data.py -- Simulates Flowbird/Conduent concentrateur Protobuf output.
 
 Generates realistic validation event batches and uploads them as .pb files
 to s3://edendulksnow/landing/{sd}/.
 
 Usage:
-    python scripts/generate_data.py --sd SD1 --count 5000
-    python scripts/generate_data.py --sd SD2 --count 5000
-    python scripts/generate_data.py --sd ALL --count 10000
+    AWS_PROFILE=edd_aws_test python scripts/generate_data.py --sd SD3 --count 5000
+    AWS_PROFILE=edd_aws_test python scripts/generate_data.py --sd SD1 --count 5000
+    AWS_PROFILE=edd_aws_test python scripts/generate_data.py --sd ALL --count 10000
 """
 
 import argparse
@@ -27,48 +27,51 @@ from validation_codec import encode_batch
 BUCKET = "edendulksnow"
 LANDING_PREFIX = "landing"
 
-SD1_LIGNES = ["H", "J", "K", "L", "N", "P"]
-SD2_LIGNES = ["B", "C", "D", "R", "U"]
-
-SD1_STATIONS = {
-    "H": ["GDN", "CPL", "CRL", "STD", "ENL"],
-    "J": ["GLZ", "MNT", "PSY", "MAS"],
-    "K": ["GDN"],
-    "L": ["GLZ", "CRY", "VRC", "PRF", "NAT"],
-    "N": ["MTG", "RAM"],
-    "P": ["GDN"],
+SD_CONFIGS = {
+    "SD1": {
+        "lignes": ["H", "J", "K", "L", "N", "P"],
+        "stations": {
+            "H": ["GDN", "CPL", "CRL", "STD", "ENL"],
+            "J": ["GLZ", "MNT", "PSY", "MAS"],
+            "K": ["GDN"],
+            "L": ["GLZ", "CRY", "VRC", "PRF", "NAT"],
+            "N": ["MTG", "RAM"],
+            "P": ["GDN"],
+        },
+    },
+    "SD2": {
+        "lignes": ["B", "C", "D", "R", "U"],
+        "stations": {
+            "B": ["BFR", "CDG1", "CDG2", "MAS2", "ANT"],
+            "C": ["AUS", "VPT", "JUV"],
+            "D": ["GLY", "ORL", "CRB", "VLN", "MLS"],
+            "R": ["GLY"],
+            "U": ["LVR", "DEF"],
+        },
+    },
 }
 
-SD2_STATIONS = {
-    "B": ["BFR", "CDG1", "CDG2", "MAS2", "ANT"],
-    "C": ["AUS", "VPT", "JUV"],
-    "D": ["GLY", "ORL", "CRB", "VLN", "MLS"],
-    "R": ["GLY"],
-    "U": ["LVR", "DEF"],
+DEFAULT_LIGNES = ["A", "B", "C", "D", "E"]
+DEFAULT_STATIONS = {
+    "A": ["ST01", "ST02", "ST03", "ST04"],
+    "B": ["ST05", "ST06", "ST07"],
+    "C": ["ST08", "ST09", "ST10"],
+    "D": ["ST11", "ST12"],
+    "E": ["ST13", "ST14", "ST15"],
 }
 
-EQUIPMENT_TYPES = {
-    "SD1": ["Flowbird_MT", "Conduent_CAB_MT", "Conduent_M1R"],
-    "SD2": ["Flowbird_MT", "Conduent_CAB_MT", "Conduent_M1R"],
-}
-
+EQUIPMENT_TYPES = ["Flowbird_MT", "Conduent_CAB_MT", "Conduent_M1R"]
 MEDIA_TYPES = ["NAVIGO", "NAVIGO_EASY", "TICKET_T_PLUS", "IMAGINE_R", "MOBILIS", "TICKET_OD"]
 RESULTS = ["VALIDATION", "VALIDATION", "VALIDATION", "VALIDATION", "VALIDATION",
            "VALIDATION", "VALIDATION", "VALIDATION", "REFUS", "FRAUDE"]
 CHANNELS = ["ENTRY", "EXIT"]
-
 PEAK_HOURS = {7, 8, 9, 17, 18, 19}
 
 
 def generate_events(sd: str, count: int, base_time: datetime) -> list[dict]:
-    if sd == "SD1":
-        lignes = SD1_LIGNES
-        stations = SD1_STATIONS
-    else:
-        lignes = SD2_LIGNES
-        stations = SD2_STATIONS
-
-    eq_types = EQUIPMENT_TYPES[sd]
+    config = SD_CONFIGS.get(sd, {"lignes": DEFAULT_LIGNES, "stations": DEFAULT_STATIONS})
+    lignes = config["lignes"]
+    stations = config["stations"]
     events = []
 
     for _ in range(count):
@@ -82,11 +85,10 @@ def generate_events(sd: str, count: int, base_time: datetime) -> list[dict]:
         minute = random.randint(0, 59)
         second = random.randint(0, 59)
 
-        jitter_days = random.randint(0, 0)
-        ts = base_time.replace(hour=hour, minute=minute, second=second) - timedelta(days=jitter_days)
+        ts = base_time.replace(hour=hour, minute=minute, second=second)
         ts_ms = int(ts.timestamp() * 1000)
 
-        eq_type = random.choice(eq_types)
+        eq_type = random.choice(EQUIPMENT_TYPES)
         eq_num = random.randint(1, 150)
         eq_id = f"{sd}-EQ-{eq_num:04d}"
 
@@ -115,8 +117,8 @@ def upload_batch(s3_client, sd: str, batch_data: bytes, batch_id: str):
 
 def main():
     parser = argparse.ArgumentParser(description="SNCF Validation Data Generator")
-    parser.add_argument("--sd", choices=["SD1", "SD2", "ALL"], default="ALL",
-                        help="Which SD to generate data for (default: ALL)")
+    parser.add_argument("--sd", type=str, default="SD3",
+                        help="SD identifier (any string: SD1, SD2, SD3, etc.)")
     parser.add_argument("--count", type=int, default=1000,
                         help="Number of events per SD (default: 1000)")
     parser.add_argument("--batch-size", type=int, default=500,

@@ -1,0 +1,32 @@
+-- =============================================================================
+-- access.sql — Roles and grants
+-- Variables: SD_DB, SD_ROLE_PREFIX
+-- Note: FUTURE GRANTs are not managed by DCM plan.
+--       They are included here for reference; move to post_deployment_grants.sql
+--       if DCM raises errors on these.
+-- =============================================================================
+
+DEFINE ROLE {{ SD_ROLE_PREFIX }}_ADMIN
+  COMMENT = 'Admin role for {{ SD_NAME }} SD';
+
+DEFINE ROLE {{ SD_ROLE_PREFIX }}_ANALYST
+  COMMENT = 'Read-only analyst role for {{ SD_NAME }} SD';
+
+GRANT ROLE {{ SD_ROLE_PREFIX }}_ANALYST TO ROLE {{ SD_ROLE_PREFIX }}_ADMIN;
+
+GRANT USAGE ON WAREHOUSE SNCF_VALIDATION_WH TO ROLE {{ SD_ROLE_PREFIX }}_ADMIN;
+GRANT USAGE ON WAREHOUSE SNCF_VALIDATION_WH TO ROLE {{ SD_ROLE_PREFIX }}_ANALYST;
+
+GRANT USAGE ON DATABASE {{ SD_DB }} TO ROLE {{ SD_ROLE_PREFIX }}_ADMIN;
+GRANT USAGE ON DATABASE {{ SD_DB }} TO ROLE {{ SD_ROLE_PREFIX }}_ANALYST;
+
+GRANT USAGE ON SCHEMA {{ SD_DB }}.RAW      TO ROLE {{ SD_ROLE_PREFIX }}_ADMIN;
+GRANT USAGE ON SCHEMA {{ SD_DB }}.ANALYTICS TO ROLE {{ SD_ROLE_PREFIX }}_ADMIN;
+GRANT USAGE ON SCHEMA {{ SD_DB }}.ANALYTICS TO ROLE {{ SD_ROLE_PREFIX }}_ANALYST;
+
+GRANT ALL   ON TABLE          {{ SD_DB }}.RAW.FACT_VALIDATIONS  TO ROLE {{ SD_ROLE_PREFIX }}_ADMIN;
+GRANT ALL   ON TABLE          {{ SD_DB }}.RAW.DIM_STATIONS      TO ROLE {{ SD_ROLE_PREFIX }}_ADMIN;
+GRANT ALL   ON TABLE          {{ SD_DB }}.RAW.DIM_EQUIPEMENTS   TO ROLE {{ SD_ROLE_PREFIX }}_ADMIN;
+GRANT ALL   ON TABLE          {{ SD_DB }}.RAW.DIM_LIGNES        TO ROLE {{ SD_ROLE_PREFIX }}_ADMIN;
+GRANT ALL   ON DYNAMIC TABLE  {{ SD_DB }}.ANALYTICS.KPI_DAILY   TO ROLE {{ SD_ROLE_PREFIX }}_ADMIN;
+GRANT SELECT ON DYNAMIC TABLE {{ SD_DB }}.ANALYTICS.KPI_DAILY   TO ROLE {{ SD_ROLE_PREFIX }}_ANALYST;

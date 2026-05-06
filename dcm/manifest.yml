@@ -1,0 +1,21 @@
+manifest_version: 2
+type: DCM_PROJECT
+default_target: 'sd_new'
+
+targets:
+  sd_new:
+    account_identifier: REPLACE_WITH_YOUR_ACCOUNT
+    project_name: 'DCM_REGISTRY.SNCF.SNCF_SD_NEW_PROJECT'
+    project_owner: ACCOUNTADMIN
+    templating_config: 'sd_new'
+
+templating:
+  defaults:
+    WH_SIZE: 'XSMALL'
+    SD_CENTRAL_ACCOUNT: 'SFSENORTHAMERICA.HORIZON_LAB_AZURE_CONSUMER_EDD'
+
+  configurations:
+    sd_new:
+      SD_NAME: 'SD3'
+      SD_DB: 'SNCF_VALIDATION_SD3'
+      SD_ROLE_PREFIX: 'SNCF_SD3'
